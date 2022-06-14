@@ -11,6 +11,7 @@ Mouse scroll to interact.
 To install and make a webpack bundle:
 
 ```
+cd RotatingPlanes
 npm install
 npm run build
 
