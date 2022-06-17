@@ -17,11 +17,12 @@ import { TWEEN } from 'three/examples/jsm/libs/tween.module.min'
 
 
 
-let camera, scene, renderer, startTime, stats, composer, renderPass, chromaticAberrationPass, model, prev_time, bloomPass, fsQuad, rotAnim, particles;
+let camera, scene, renderer, stats, composer, renderPass, chromaticAberrationPass, model, bloomPass, fsQuad, posAnim, rotAnim, particles;
 let camNear = 0.1;
 let camFar = 75;
 let tweens = [];
 let tweensPos = [];
+let tweensRot = [];
 let timer = 0;
 
 
@@ -101,7 +102,7 @@ function init() {
                     next.start();
                 }
 
-                    }));
+        }));
                     
         
 
@@ -115,30 +116,78 @@ function init() {
 
         let newt = Date.now();
         let delta = newt - timer;
-        if (delta < 16)
+        if (delta < 10)
             return;
         timer = newt;
+
+        let sign = e.movementX > -0.01? '+': '-'
+
+        //Position animation change
 
         tweensPos.push(new TWEEN.Tween(particles.position)
         .to(
             {
-                y: '+0.001',
+                y: sign + '0.001',
             },
             5
-        ).easing(TWEEN.Easing.Bounce.Out).onComplete(() => {
+        ).easing(TWEEN.Easing.Bounce.Out).onStart(() =>{
+
+            if (posAnim)
+                posAnim.stop();
+
+        }).onComplete(() => {
             tweensPos.shift();
+
             if (tweensPos.length > 0)
             {
                 let next = tweensPos[0];
                 next.start();
+            }
+            else if (posAnim)
+            {
+                posAnim.start();
+                posAnim.repeat(Infinity);
+            }
+
+        }));
+
+        if (tweensPos.length == 1)
+            tweensPos[0].start();
+
+
+        //Rotation animation change
+
+        tweensRot.push(new TWEEN.Tween(model.rotation)
+        .to(
+            {
+                y: sign + '0.006',
+            },
+            5
+        ).easing(TWEEN.Easing.Bounce.Out).onStart(() => {
+
+            if (rotAnim)
+                rotAnim.stop();
+
+        }).onComplete(() => {
+            tweensRot.shift();
+            
+            if (tweensRot.length > 0)
+            {
+                let next = tweensRot[0];
+                next.start();
+            }
+            else if (rotAnim)
+            {
+                rotAnim.start();
+                rotAnim.repeat(Infinity);
             }
 
         }));
                 
         
 
-        if (tweensPos.length == 1)
-            tweensPos[0].start();
+        if (tweensRot.length == 1)
+            tweensRot[0].start();
     };
 
     window.addEventListener( 'resize', onWindowResize );
@@ -191,6 +240,17 @@ function init() {
     particles = new THREE.Points(particleGeometry, materialP);
     scene.add(particles);
 
+    posAnim = new TWEEN.Tween(particles.position)
+        .to(
+            {
+                y: '+1.0',
+            },
+            100000
+        )
+
+    posAnim.start()
+    posAnim.repeat(Infinity)
+
     const loader = new GLTFLoader().setPath( '../resources/scene/' );
     loader.load( 'l4.glb', function ( gltf ) {
 
@@ -209,9 +269,7 @@ function init() {
         rotAnim = new TWEEN.Tween(model.rotation)
             .to(
                 {
-                    x: model.rotation.x,
-                    y: model.rotation.y + 2 * Math.PI,
-                    z: model.rotation.z,
+                    y: '+6.28',
                 },
                 100000
             )
@@ -351,10 +409,6 @@ function init() {
     folderLocal.add(propsLocal, 'bloom_thr', 0, 1);
     folderLocal.add(propsLocal, 'up', 0.5, 5);
 
-    //Start Time
-
-    startTime = Date.now();
-
 
 }
 
@@ -374,12 +428,6 @@ function onWindowResize() {
 }
 
 function animate() {
-
-    const currentTime = Date.now();
-    const time = ( currentTime - startTime ) / 1000;
-    const delta = time- prev_time;
-    prev_time = time;
-
     requestAnimationFrame( animate );
 
     stats.begin();
