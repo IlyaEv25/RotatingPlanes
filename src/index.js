@@ -17,9 +17,12 @@ import { TWEEN } from 'three/examples/jsm/libs/tween.module.min'
 
 
 
-let camera, scene, renderer, startTime, stats, composer, renderPass, chromaticAberrationPass, model, prev_time, bloomPass, fsQuad, rotAnim, rotAnimInv;
+let camera, scene, renderer, startTime, stats, composer, renderPass, chromaticAberrationPass, model, prev_time, bloomPass, fsQuad, rotAnim, particles;
 let camNear = 0.1;
 let camFar = 75;
+let tweens = [];
+let tweensPos = [];
+let timer = 0;
 
 
 const params = {
@@ -28,7 +31,10 @@ const params = {
     bloomStrength: 4,
     bloomThreshold: 0.05,
     bloomRadius: 1.13,
-    pixelRatio: 2
+    pixelRatio: 2, 
+    currentScroll: 0,
+    delta: 0,
+    target: [0, 0, 0]
 }
 
 init();
@@ -40,8 +46,6 @@ function init() {
 
     scene = new THREE.Scene();
 
-    stats = new Stats();
-    document.body.appendChild( stats.dom );
 
     // Renderer
 
@@ -53,55 +57,97 @@ function init() {
     renderer.setSize( window.innerWidth, window.innerHeight );
     renderer.setClearColor(0x0, 0)
 
+
+    let container = document.getElementsByClassName("container")[0];
+    container.appendChild( renderer.domElement );
+
+    stats = new Stats();
+    container.appendChild( stats.dom );
+
     // Camera
 
     camera = new THREE.PerspectiveCamera( 30, window.innerWidth / window.innerHeight, camNear, camFar );
     camera.position.set( 0, -3.5, 3.5 );
-    camera.lookAt(0, 0., 0)
+    camera.lookAt(params.target[0], params.target[1], params.target[2]);
     camera.rotateOnAxis(new THREE.Vector3(0, 1, 0), params.camY * Math.PI);
 
     // Event Listeners
 
-    window.addEventListener( 'resize', onWindowResize );
-    window.addEventListener( 'wheel', (e) => {
+    let scrollCallback = (e) => {
+
         var y_axis = new THREE.Vector3( 0, 1, 0 );
         var quaternion = new THREE.Quaternion;
-        let pos = camera.position.clone();
-        
-        pos.applyQuaternion(quaternion.setFromAxisAngle(y_axis, e.deltaY/500));
-        new TWEEN.Tween(camera.position)
+        let pos = new THREE.Vector3( 0, -3.5, 3.5 ); //new THREE.Vector3( 0, -3.5, 3.5 );//camera.position.clone();
+
+        pos.applyQuaternion(quaternion.setFromAxisAngle(y_axis,  Math.PI * (window.scrollY/(document.body.offsetHeight - window.innerHeight))));
+
+        tweens.push(new TWEEN.Tween(camera.position)
             .to(
                 {
                     x: pos.x,
                     y: pos.y,
                     z: pos.z,
                 },
-                500
-            ).onStart(() => {
-                if (rotAnim) {
-                    rotAnim.stop();
-                    rotAnimInv.stop();
-                }
-            }).onUpdate(() => {
-                //camera.position.copy(pos);
-                camera.lookAt(0, 0, 0);
+                15
+            ).onUpdate(() => {
+                camera.lookAt(params.target[0], params.target[1], params.target[2]);
                 camera.rotateOnAxis(new THREE.Vector3(0, 1, 0), params.camY * Math.PI);
-                if (rotAnim) {
+            }).onComplete(() => {
 
-                    if (e.deltaY > 0) {
-                        rotAnim.stop();
-                        rotAnimInv.start();
-                    }
-                    else {
-                        rotAnimInv.stop();
-                        rotAnim.start();
-                    }
+                tweens.shift();
+                if (tweens.length > 0)
+                {
+                    let next = tweens[0];
+                    next.start();
                 }
-            })
-            .start()
 
-    });
-    document.body.appendChild( renderer.domElement );
+                    }));
+                    
+        
+
+        if (tweens.length == 1)
+            tweens[0].start();
+    
+
+    };
+
+    let pointerCallback = (e) => {
+
+        let newt = Date.now();
+        let delta = newt - timer;
+        if (delta < 16)
+            return;
+        timer = newt;
+
+        tweensPos.push(new TWEEN.Tween(particles.position)
+        .to(
+            {
+                y: '+0.001',
+            },
+            5
+        ).easing(TWEEN.Easing.Bounce.Out).onComplete(() => {
+            tweensPos.shift();
+            if (tweensPos.length > 0)
+            {
+                let next = tweensPos[0];
+                next.start();
+            }
+
+        }));
+                
+        
+
+        if (tweensPos.length == 1)
+            tweensPos[0].start();
+    };
+
+    window.addEventListener( 'resize', onWindowResize );
+
+    window.addEventListener( 'scroll', scrollCallback);
+
+    window.addEventListener( 'pointermove', pointerCallback);
+    
+
 
     // Lights
 
@@ -131,7 +177,7 @@ function init() {
     let posArray = new Float32Array(cnt* 3);
 
     for(let i = 0; i < cnt * 3; i++) {
-        posArray[i] = (Math.random() - 0.5) * 5;
+        posArray[i] = (Math.random() - 0.5) * 7;
     }
     particleGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
 
@@ -142,7 +188,7 @@ function init() {
         transparent: true
     })
 
-    let particles = new THREE.Points(particleGeometry, materialP);
+    particles = new THREE.Points(particleGeometry, materialP);
     scene.add(particles);
 
     const loader = new GLTFLoader().setPath( '../resources/scene/' );
@@ -150,8 +196,11 @@ function init() {
 
         model = gltf.scene;
 
-        model.traverse((o) => { if (o.isMesh) o.material = new THREE.MeshPhysicalMaterial(); });
+        model.traverse((o) => { 
+            if (o.isMesh) o.material = new THREE.MeshPhysicalMaterial();
+         });
           
+
 
         model.position.set(0,0,0);
 
@@ -161,21 +210,11 @@ function init() {
             .to(
                 {
                     x: model.rotation.x,
-                    y: model.rotation.y - 2 * Math.PI,
+                    y: model.rotation.y + 2 * Math.PI,
                     z: model.rotation.z,
                 },
-                300000
+                100000
             )
-
-        rotAnimInv = new TWEEN.Tween(model.rotation)
-        .to(
-            {
-                x: model.rotation.x,
-                y: model.rotation.y + 2 * Math.PI,
-                z: model.rotation.z,
-            },
-            300000
-        )
 
         rotAnim.start()
         rotAnim.repeat(Infinity)
@@ -252,7 +291,7 @@ function init() {
 
                 params.camY = v;
 
-                camera.lookAt(0, 0, 0);
+                camera.lookAt(params.target[0], params.target[1], params.target[2]);
                 camera.rotateOnAxis(new THREE.Vector3(0, 1, 0), v * Math.PI);
 
             },
@@ -299,11 +338,8 @@ function init() {
 
                 renderer.setPixelRatio(v);
                 composer.setPixelRatio(v);
-                chromaticAberrationPass.material.uniforms['resolution'].value = new THREE.Vector2(
-					window.innerWidth * v,
-					window.innerHeight * v
-                );
-
+                params.pixelRatio = v;
+                onWindowResize();
             }
         
 
@@ -349,6 +385,7 @@ function animate() {
     stats.begin();
 
     TWEEN.update();
+
 
     composer.render();
     //renderer.setRenderTarget(null);
