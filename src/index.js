@@ -17,7 +17,7 @@ import { TWEEN } from 'three/examples/jsm/libs/tween.module.min'
 
 
 
-let camera, scene, renderer, stats, composer, renderPass, chromaticAberrationPass, model, bloomPass, fsQuad, posAnim, rotAnim, particles;
+let camera, scene, renderer, stats, composer, renderPass, chromaticAberrationPass, model, bloomPass, fsQuad, posAnim, rotAnim, particles, pointer;
 let camNear = 0.1;
 let camFar = 75;
 let tweens = [];
@@ -35,8 +35,148 @@ const params = {
     pixelRatio: 2, 
     currentScroll: 0,
     delta: 0,
-    target: [0, 0, 0]
+    target: [0, 0, 0],
+    cursorAnimation: 0
 }
+
+
+function onWindowResize() {
+
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+
+    chromaticAberrationPass.uniforms['resolution'].value = new THREE.Vector2 (
+        window.innerWidth * params.pixelRatio,
+        window.innerHeight * params.pixelRatio
+    )
+
+    renderer.setSize( window.innerWidth, window.innerHeight );
+    composer.setSize( window.innerWidth, window.innerHeight );
+
+}
+
+let scrollCallback = (e) => {
+
+    var y_axis = new THREE.Vector3( 0, 1, 0 );
+    var quaternion = new THREE.Quaternion;
+    let pos = new THREE.Vector3( 0, -3.5, 3.5 ); //new THREE.Vector3( 0, -3.5, 3.5 );//camera.position.clone();
+
+    pos.applyQuaternion(quaternion.setFromAxisAngle(y_axis,  Math.PI * (window.scrollY/(document.body.offsetHeight - window.innerHeight))));
+
+    tweens.push(new TWEEN.Tween(camera.position)
+        .to(
+            {
+                x: pos.x,
+                y: pos.y,
+                z: pos.z,
+            },
+            15
+        ).onUpdate(() => {
+            camera.lookAt(params.target[0], params.target[1], params.target[2]);
+            camera.rotateOnAxis(new THREE.Vector3(0, 1, 0), params.camY * Math.PI);
+        }).onComplete(() => {
+
+            tweens.shift();
+            if (tweens.length > 0)
+            {
+                let next = tweens[0];
+                next.start();
+            }
+
+    }));
+                
+    
+
+    if (tweens.length == 1)
+        tweens[0].start();
+
+
+};
+
+
+
+let pointerCallback = (v) => (e) => {
+
+    let newt = Date.now();
+    let delta = newt - timer;
+    if (delta < 10)
+        return;
+    timer = newt;
+
+    if ((Math.abs(e.movementX) < window.innerWidth/100) && v == 1)
+        return;
+
+    let sign = e.movementX > -0.01? '+': '-'
+
+    //Position animation change
+
+    tweensPos.push(new TWEEN.Tween(particles.position)
+    .to(
+        {
+            y: sign + '0.001',
+        },
+        5
+    ).easing(TWEEN.Easing.Bounce.Out).onStart(() =>{
+
+        if (posAnim)
+            posAnim.stop();
+
+    }).onComplete(() => {
+        tweensPos.shift();
+
+        if (tweensPos.length > 0)
+        {
+            let next = tweensPos[0];
+            next.start();
+        }
+        else if (posAnim)
+        {
+            posAnim.start();
+            posAnim.repeat(Infinity);
+        }
+
+    }));
+
+    if (tweensPos.length == 1)
+        tweensPos[0].start();
+
+
+    //Rotation animation change
+
+    tweensRot.push(new TWEEN.Tween(model.rotation)
+    .to(
+        {
+            y: sign + '0.006',
+        },
+        5
+    ).easing(TWEEN.Easing.Bounce.Out).onStart(() => {
+
+        if (rotAnim)
+            rotAnim.stop();
+
+    }).onComplete(() => {
+        tweensRot.shift();
+
+        if (tweensRot.length > 0)
+        {
+            let next = tweensRot[0];
+            next.start();
+        }
+        else if (rotAnim)
+        {
+            rotAnim.start();
+            rotAnim.repeat(Infinity);
+        }
+
+    }));
+            
+    
+
+    if (tweensRot.length == 1)
+        tweensRot[0].start();
+};
+
+
 
 init();
 animate();
@@ -74,127 +214,13 @@ function init() {
 
     // Event Listeners
 
-    let scrollCallback = (e) => {
-
-        var y_axis = new THREE.Vector3( 0, 1, 0 );
-        var quaternion = new THREE.Quaternion;
-        let pos = new THREE.Vector3( 0, -3.5, 3.5 ); //new THREE.Vector3( 0, -3.5, 3.5 );//camera.position.clone();
-
-        pos.applyQuaternion(quaternion.setFromAxisAngle(y_axis,  Math.PI * (window.scrollY/(document.body.offsetHeight - window.innerHeight))));
-
-        tweens.push(new TWEEN.Tween(camera.position)
-            .to(
-                {
-                    x: pos.x,
-                    y: pos.y,
-                    z: pos.z,
-                },
-                15
-            ).onUpdate(() => {
-                camera.lookAt(params.target[0], params.target[1], params.target[2]);
-                camera.rotateOnAxis(new THREE.Vector3(0, 1, 0), params.camY * Math.PI);
-            }).onComplete(() => {
-
-                tweens.shift();
-                if (tweens.length > 0)
-                {
-                    let next = tweens[0];
-                    next.start();
-                }
-
-        }));
-                    
-        
-
-        if (tweens.length == 1)
-            tweens[0].start();
-    
-
-    };
-
-    let pointerCallback = (e) => {
-
-        let newt = Date.now();
-        let delta = newt - timer;
-        if (delta < 10)
-            return;
-        timer = newt;
-
-        let sign = e.movementX > -0.01? '+': '-'
-
-        //Position animation change
-
-        tweensPos.push(new TWEEN.Tween(particles.position)
-        .to(
-            {
-                y: sign + '0.001',
-            },
-            5
-        ).easing(TWEEN.Easing.Bounce.Out).onStart(() =>{
-
-            if (posAnim)
-                posAnim.stop();
-
-        }).onComplete(() => {
-            tweensPos.shift();
-
-            if (tweensPos.length > 0)
-            {
-                let next = tweensPos[0];
-                next.start();
-            }
-            else if (posAnim)
-            {
-                posAnim.start();
-                posAnim.repeat(Infinity);
-            }
-
-        }));
-
-        if (tweensPos.length == 1)
-            tweensPos[0].start();
-
-
-        //Rotation animation change
-
-        tweensRot.push(new TWEEN.Tween(model.rotation)
-        .to(
-            {
-                y: sign + '0.006',
-            },
-            5
-        ).easing(TWEEN.Easing.Bounce.Out).onStart(() => {
-
-            if (rotAnim)
-                rotAnim.stop();
-
-        }).onComplete(() => {
-            tweensRot.shift();
-            
-            if (tweensRot.length > 0)
-            {
-                let next = tweensRot[0];
-                next.start();
-            }
-            else if (rotAnim)
-            {
-                rotAnim.start();
-                rotAnim.repeat(Infinity);
-            }
-
-        }));
-                
-        
-
-        if (tweensRot.length == 1)
-            tweensRot[0].start();
-    };
+    pointer = pointerCallback(params.cursorAnimation);
 
     window.addEventListener( 'resize', onWindowResize );
 
     window.addEventListener( 'scroll', scrollCallback);
 
-    window.addEventListener( 'pointermove', pointerCallback);
+    window.addEventListener( 'pointermove', pointer);
     
 
 
@@ -398,6 +424,19 @@ function init() {
                 composer.setPixelRatio(v);
                 params.pixelRatio = v;
                 onWindowResize();
+            },
+
+            get 'cursorAnimation'() {
+
+                return params.cursorAnimation;
+
+            },
+            set 'cursorAnimation'( v ) {
+
+                params.cursorAnimation = v;
+                window.removeEventListener('pointermove', pointer);
+                pointer = pointerCallback(params.cursorAnimation);
+                window.addEventListener( 'pointermove', pointer);
             }
         
 
@@ -408,24 +447,11 @@ function init() {
     folderLocal.add(propsLocal, 'bloom_rad', 0, 5);
     folderLocal.add(propsLocal, 'bloom_thr', 0, 1);
     folderLocal.add(propsLocal, 'up', 0.5, 5);
+    folderLocal.add(propsLocal, 'cursorAnimation', [0,1]);
 
 
 }
 
-function onWindowResize() {
-
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-
-    chromaticAberrationPass.uniforms['resolution'].value = new THREE.Vector2 (
-        window.innerWidth * params.pixelRatio,
-        window.innerHeight * params.pixelRatio
-    )
-
-    renderer.setSize( window.innerWidth, window.innerHeight );
-    composer.setSize( window.innerWidth, window.innerHeight );
-
-}
 
 function animate() {
     requestAnimationFrame( animate );
