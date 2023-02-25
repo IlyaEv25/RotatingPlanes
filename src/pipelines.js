@@ -1,5 +1,5 @@
 let DeferedMotionBlurTAAPipeline = {
-  pipe: ["gBuffer", "tilemaxY", "tilemaxX", "neighbourmax", "SSAO", "shadow", "light", "taaresolve", "accumulation", "motionblur", "final"],
+  pipe: ["gBuffer", "tilemaxY", "tilemaxX", "neighbourmax", "SSAO", "light", "taaresolve", "accumulation", "motionblur", "final"],
 
   dependencies: {
     gBuffer: [],
@@ -19,7 +19,6 @@ let DeferedMotionBlurTAAPipeline = {
       },
     ],
 
-    shadow: [],
 
     light: [
       {
@@ -39,13 +38,6 @@ let DeferedMotionBlurTAAPipeline = {
         pass: "gBuffer",
         type: "depth",
         uniform: "u_depth",
-        channel: 0,
-      },
-
-      {
-        pass: "shadow",
-        type: "depth",
-        uniform: "u_shadow_depth",
         channel: 0,
       },
 
@@ -181,7 +173,6 @@ let DeferedMotionBlurBloomTAAPipeline = {
     "tilemaxX",
     "neighbourmax",
     "SSAO",
-    "shadow",
     "light",
     "bloomDown1",
     "bloomDown2",
@@ -217,8 +208,6 @@ let DeferedMotionBlurBloomTAAPipeline = {
       },
     ],
 
-    shadow: [],
-
     light: [
       {
         pass: "gBuffer",
@@ -237,13 +226,6 @@ let DeferedMotionBlurBloomTAAPipeline = {
         pass: "gBuffer",
         type: "depth",
         uniform: "u_depth",
-        channel: 0,
-      },
-
-      {
-        pass: "shadow",
-        type: "depth",
-        uniform: "u_shadow_depth",
         channel: 0,
       },
 

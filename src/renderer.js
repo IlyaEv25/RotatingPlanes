@@ -281,12 +281,14 @@ class LightPass extends QuadOverForwardScenePass {
 
       this.shadowPasses[index].render(renderer, scene, light.shadowCamera, uniformObject, dependencyGraph);
       this.uniforms["lights"].value.push({
+        position: light.position,
         intensity: light.intensity,
         color: light.color,
         intensity: light.intensity,
-        type: light.type,
+        type: lightTypeMap[light.type],
         attenuationRadius: light.attenuationRadius,
         radius: light.radius,
+        useShadow: light.useShadow
       });
       this.uniforms["u_shadow_depth"].value.push(this.shadowPasses[index].renderTarget.depthTexture);
     });

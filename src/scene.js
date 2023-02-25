@@ -18,11 +18,13 @@ let Material = {
 }
 
 let light = {
-    color: 0xffffff,
+    position: THREE.Vector3(),
+    color: THREE.Color(0xffffff),
     intensity: 1.0,
     type: "AREA",
     attenuationRadius: 1.0,
     radius: 1.0,
     index: 0,
+    useShadow: false,
     shadowCamera: null,
 }
