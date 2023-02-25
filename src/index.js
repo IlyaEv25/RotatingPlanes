@@ -10,6 +10,9 @@ import { UnrealBloomPass } from './unreal';
 import { ChromaticAberrationShader } from './chromab';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 
+import Pipeline from './renderer';
+import { DeferedMotionBlurBloomTAAPipeline } from "./pipelines"
+
 import { CopyShader } from 'three/examples/jsm/shaders/CopyShader.js';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { TWEEN } from 'three/examples/jsm/libs/tween.module.min'
