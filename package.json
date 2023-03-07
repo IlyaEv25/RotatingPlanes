@@ -11,7 +11,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "three": "^0.141.0"
+    "three": "^0.141.0",
+    "webpack-glsl-loader": "^1.0.1"
   },
   "devDependencies": {
     "webpack": "^5.73.0",

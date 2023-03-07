@@ -212,14 +212,21 @@ let DeferedMotionBlurBloomTAAPipeline = {
       {
         pass: "gBuffer",
         type: "color",
-        uniform: "u_color",
+        uniform: "u_albedo_roughness",
         channel: 0,
       },
       {
         pass: "gBuffer",
         type: "color",
-        uniform: "u_normal",
+        uniform: "u_normal_metalness",
         channel: 1,
+      },
+
+      {
+        pass: "gBuffer",
+        type: "color",
+        uniform: "u_emission",
+        channel: 3,
       },
 
       {

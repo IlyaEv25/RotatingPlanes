@@ -1,6 +1,6 @@
 let Scene = { //extends three js scene
-    deferedMaterials: [], //materials, each has a mesh array
-    forwardMaterials: [],
+    deferedObjects: [], //materials, each has a mesh array
+    forwardObjects: [],
     shadowMaterial : [], //meshes
     camera: null,
     lights: [

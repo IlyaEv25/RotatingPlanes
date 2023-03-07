@@ -14,18 +14,16 @@
 
 precision highp float;
 precision highp sampler2D;
-precision highp usampler2D;
 
 attribute vec3 position;
 attribute vec3 normal;
 attribute vec2 uv;
-attribute vec2 lookup;
-attribute float inds;
 
 uniform mat4 modelMatrix;
 uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
 uniform mat4 previousViewMatrix;
+uniform mat4 previousModelMatrix;
 
 uniform float u_counter;
 uniform vec2 resolution;
@@ -61,7 +59,7 @@ float Halton(int i, int b)
 
 void main(){
 	
-	vPosition = position;
+	vec3 vPosition = position;
 	vNormal=normalize(normal);
 
 	float haltonX = 2.0 * Halton(int(u_counter) + 1, 2) - 1.0;
@@ -73,21 +71,7 @@ void main(){
 	jitteredProjectionMatrix[2][0] = jitterX;
 	jitteredProjectionMatrix[2][1] = jitterY;
 
-	float previousHaltonX = 2.0 * Halton(int(u_counter), 2) - 1.0;
-	float previousHaltonY = 2.0 * Halton(int(u_counter), 3) - 1.0;
-	float previousJitterX = (previousHaltonX / (2.0 * resolution.x));
-	float previousJitterY = (previousHaltonY / (2.0 * resolution.y));
-
-	mat4 jitteredPrevioisProjectionMatrix = projectionMatrix;
-	jitteredPrevioisProjectionMatrix[0][2] = previousJitterX;
-	jitteredPrevioisProjectionMatrix[1][2] = previousJitterY;
-
-	//better use previous modelview matrix
-	//vJitteredPreviousClipSpacePosition = jitteredPrevioisProjectionMatrix * vec4((previousViewMatrix * vPreviousClipSpacePosition).xyz, 1.0);
-	//vJitteredClipSpacePosition = jitteredProjectionMatrix * vec4((modelViewMatrix * vec4(vPosition, 1.0)).xyz, 1.0);
-
-	//vJitteredPreviousClipSpacePosition = jitteredPrevioisProjectionMatrix * vec4((previousViewMatrix * vPreviousClipSpacePosition).xyz, 1.0);
-	vPreviousClipSpacePosition = projectionMatrix * vec4((previousViewMatrix * vPreviousClipSpacePosition).xyz, 1.0);
+	vPreviousClipSpacePosition = projectionMatrix * vec4((previousViewMatrix * previousModelMatrix * vec4(vPosition, 1.0)).xyz, 1.0);
 	vClipSpacePosition = projectionMatrix * vec4((modelViewMatrix * vec4(vPosition, 1.0)).xyz, 1.0);
 
 	vec4 mvp=modelViewMatrix*vec4(vPosition,1.);

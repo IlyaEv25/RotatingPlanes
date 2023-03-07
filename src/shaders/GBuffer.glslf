@@ -21,13 +21,17 @@ uniform float metalness;
 uniform vec3 emissiveColor;
 uniform float emissiveStrength;
 
+uniform float targetFPS;
+uniform float FPS;
+uniform float bloomVelocityMultiplier;
+
 uniform vec2 resolution;
 
-layout(location = 0) out vec4 gColor;
-layout(location = 1) out vec4 gNormal;
+layout(location = 0) out vec4 gAlbedoRoughness;
+layout(location = 1) out vec4 gNormalMetalness;
 layout(location = 2) out vec4 gVelocity;
-// layout(location = 2) out vec4 gRoughness;
-// layout(location = 3) out vec4 gMetalness;
+layout(location = 3) out vec4 gEmission;
+
 
 varying vec3 vNormal;
 varying vec4 vPreviousClipSpacePosition;
@@ -41,6 +45,9 @@ void main() {
 	vec3 previousClipSpacePosition = vPreviousClipSpacePosition.xyz / vPreviousClipSpacePosition.w;
 	vec3 clipSpacePosition = vClipSpacePosition.xyz / vClipSpacePosition.w;
 
-	gVelocity = vec4( (144.0 / 60.0) *  5.5 * resolution * (0.5 * (clipSpacePosition - previousClipSpacePosition).xy), 0.5 * (clipSpacePosition - previousClipSpacePosition).xy); //2.0 * 5.5
+	gAlbedoRoughness = vec4(color, 1.0 + roughness);
+	gNormalMetalness = vec4(n, metalness);
+	gVelocity = vec4( (FPS / targetFPS) *  bloomVelocityMultiplier * resolution * (0.5 * (clipSpacePosition - previousClipSpacePosition).xy), 0.5 * (clipSpacePosition - previousClipSpacePosition).xy); //2.0 * 5.5
+	gEmission = vec4(emissiveColor, emissiveStrength);
 
 }

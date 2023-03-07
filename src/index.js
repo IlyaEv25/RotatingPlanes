@@ -12,10 +12,14 @@ import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 
 import Pipeline from "./renderer";
 import { DeferedMotionBlurBloomTAAPipeline } from "./pipelines";
+import UniformsPool from "./UniformsPool";
 
 import { CopyShader } from "three/examples/jsm/shaders/CopyShader.js";
 import { FullScreenQuad } from "three/examples/jsm/postprocessing/Pass.js";
 import { TWEEN } from "three/examples/jsm/libs/tween.module.min";
+import shaderLoad from "./shaders";
+
+let shaders = shaderLoad();
 
 let camera,
   scene,
@@ -49,6 +53,12 @@ const params = {
   delta: 0,
   target: [0, 0, 0],
   cursorAnimation: 0,
+  environmentOn: false,
+  shadowDarkness: 0.85,
+  shadowRadius: 1.0,
+  shadowBias: 0.005,
+  numOfPoissonDisks: 12,
+  useSoftShadows: false,
 };
 
 function onWindowResize() {
@@ -138,61 +148,111 @@ let pointerCallback = (v) => (e) => {
 
   //Rotation animation change
 
-  tweensRot.push(
-    new TWEEN.Tween(model.rotation)
-      .to(
-        {
-          y: sign + "0.006",
-        },
-        5
-      )
-      .easing(TWEEN.Easing.Bounce.Out)
-      .onStart(() => {
-        if (rotAnim) rotAnim.stop();
-      })
-      .onComplete(() => {
-        tweensRot.shift();
+  if (model)
+    tweensRot.push(
+      new TWEEN.Tween(model.rotation)
+        .to(
+          {
+            y: sign + "0.006",
+          },
+          5
+        )
+        .easing(TWEEN.Easing.Bounce.Out)
+        .onStart(() => {
+          if (rotAnim) rotAnim.stop();
+        })
+        .onComplete(() => {
+          tweensRot.shift();
 
-        if (tweensRot.length > 0) {
-          let next = tweensRot[0];
-          next.start();
-        } else if (rotAnim) {
-          rotAnim.start();
-          rotAnim.repeat(Infinity);
-        }
-      })
-  );
+          if (tweensRot.length > 0) {
+            let next = tweensRot[0];
+            next.start();
+          } else if (rotAnim) {
+            rotAnim.start();
+            rotAnim.repeat(Infinity);
+          }
+        })
+    );
 
   if (tweensRot.length == 1) tweensRot[0].start();
 };
 
-init();
-animate();
-
 class Scene extends THREE.Scene {
   constructor() {
-    this.deferedMaterials = []; //materials, each has a mesh array
-    this.forwardMaterials = [];
+    super();
+    this.deferedObjects = []; //materials, each has a mesh array
+    this.forwardObjects = [];
     this.shadowMaterial = []; //meshes
     this.camera = null;
     this.lights = [];
     this.invisible = [];
+    this.backgroundColor = 0x0;
   }
 
-  addDeferedMaterial(materialDescription){
-    this.deferedMaterials.push({...materialDescription, meshes: [] });
+  addDefered(mesh, addToScene) {
+    if (addToScene) super.add(mesh);
+    this.deferedObjects.push(mesh);
   }
 
-  addDefered(mesh, index) {
-    this.deferedMaterials[index].meshes.push(mesh);
+  addForward(object, addToScene) {
+    if (addToScene) super.add(object);
+    this.forwardObjects.push(object);
   }
 
   addLight(lightDescription, shadowCamera) {
-    this.lights.push({...lightDescription, shadowCamera });
+    this.lights.push({ ...lightDescription, shadowCamera });
   }
-  addCamera(camera)
-  {
+  addCamera(camera) {
     this.camera = camera;
+  }
+  setBackgroundColor(color)
+  {
+    this.backgroundColor = color;
+  }
+}
+
+class DeferedMesh extends THREE.Mesh {
+  constructor(geometry, materialDescription) {
+    let uniforms = THREE.UniformsUtils.clone(shaders.GBuffer.uniforms);
+
+    Object.keys(materialDescription).forEach((key) => {
+      uniforms[key].value = materialDescription[key];
+    });
+
+    let deferedMaterial = new THREE.RawShaderMaterial({
+      uniforms: uniforms,
+      vertexShader: shaders.GBuffer.vertexShader,
+      fragmentShader: shaders.GBuffer.fragmentShader,
+      defines: shaders.GBuffer.defines,
+    });
+    deferedMaterial.glslVersion = THREE.GLSL3;
+
+    super(geometry, deferedMaterial);
+
+    this.deferedMaterial = deferedMaterial;
+    this.uniforms = uniforms;
+
+    this.previousMatrixWorld = new THREE.Matrix4();
+
+    this.deferedMaterial.onBeforeRender = (_this, scene, camera, geometry, object, group) => {
+      if (this.uniforms["modelViewMatrix"]) this.uniforms["modelViewMatrix"].value = object.modelViewMatrix;
+      if (this.uniforms["modelMatrix"]) this.uniforms["modelMatrix"].value = object.matrixWorld;
+      if (this.uniforms["projectionMatrix"]) this.uniforms["projectionMatrix"].value = camera.projectionMatrix;
+      if (this.uniforms["previousModelMatrix"]) this.uniforms["previousModelMatrix"].value = this.previousMatrixWorld;
+
+      this.previousMatrixWorld = object.matrixWorld;
+    };
+
+    this.isDefered = true;
+  }
+
+  updateGlobalUniforms(uniformObject, u_counter) {
+
+    if (this.uniforms["u_counter"]) this.uniforms["u_counter"].value = u_counter;
+
+    Object.keys(this.uniforms).forEach((key) => {
+      if (key in uniformObject) this.uniforms[key].value = uniformObject[key];
+    });
   }
 }
 
@@ -203,14 +263,16 @@ function init() {
 
   // Renderer
 
-//   renderer = new THREE.WebGLRenderer({
-//     antialias: true,
-//     precision: "highp",
-//   });
-//   renderer.setPixelRatio(params.pixelRatio);
-//   renderer.setSize(window.innerWidth, window.innerHeight);
+  //   renderer = new THREE.WebGLRenderer({
+  //     antialias: true,
+  //     precision: "highp",
+  //   });
+  //   renderer.setPixelRatio(params.pixelRatio);
+  //   renderer.setSize(window.innerWidth, window.innerHeight);
 
-  renderer = new Pipeline(widnow.innerWidth, window,innerHeight, DeferedMotionBlurBloomTAAPipeline);
+  renderer = new Pipeline(window.innerWidth, window.innerHeight, DeferedMotionBlurBloomTAAPipeline);
+  //renderer.renderer.setClearColor(0x0e1946, 1);
+  scene.setBackgroundColor(0x0e1946);
   renderer.renderer.setClearColor(0x0, 0);
 
   let container = document.getElementsByClassName("container")[0];
@@ -226,6 +288,8 @@ function init() {
   camera.lookAt(params.target[0], params.target[1], params.target[2]);
   camera.rotateOnAxis(new THREE.Vector3(0, 1, 0), params.camY * Math.PI);
 
+  scene.addCamera(camera);
+
   // Event Listeners
 
   pointer = pointerCallback(params.cursorAnimation);
@@ -238,65 +302,69 @@ function init() {
 
   // Lights
 
-//   const light1 = new THREE.PointLight(0xfff444, 0.4, 100);
-//   light1.position.set(0, 0, 0.0);
-//   scene.add(light1);
+  //   const light1 = new THREE.PointLight(0xfff444, 0.4, 100);
+  //   light1.position.set(0, 0, 0.0);
+  //   scene.add(light1);
 
-//   const light2 = new THREE.PointLight(0x0070ff, 0.8, 100);
-//   light2.position.set(0, 10, 0);
-//   scene.add(light2);
+  //   const light2 = new THREE.PointLight(0x0070ff, 0.8, 100);
+  //   light2.position.set(0, 10, 0);
+  //   scene.add(light2);
 
-//   const light3 = new THREE.PointLight(0xcd00e1, 0.3, 100);
-//   light3.position.set(10, 0, -10);
-//   scene.add(light3);
+  //   const light3 = new THREE.PointLight(0xcd00e1, 0.3, 100);
+  //   light3.position.set(10, 0, -10);
+  //   scene.add(light3);
 
-//   const light4 = new THREE.PointLight(0xff6567, 0.5, 100);
-//   light4.position.set(0, 0, 10);
-//   scene.add(light4);
+  //   const light4 = new THREE.PointLight(0xff6567, 0.5, 100);
+  //   light4.position.set(0, 0, 10);
+  //   scene.add(light4);
 
-    let light1 = {
-        position: THREE.Vector3(0, 0, 0.0),
-        color: THREE.Color(0xffffff),
-        intensity: 1.0,
-        type: "POINT",
-        attenuationRadius: 1.0,
-        radius: 1.0,
-        index: 0,
-        shadowCamera: null,
-    }
+  let light1 = {
+    position: new THREE.Vector3(0, 0, 0.0),
+    color: new THREE.Color(0xfff444),
+    intensity: 8.4,
+    type: "POINT",
+    attenuationRadius: 60.0,
+    radius: 1.0,
+    useShadow: false,
+    shadowCamera: null,
+  };
 
-    let light2 = {
-        position: THREE.Vector3(0, 10, 0),
-        color: THREE.Color(0xffffff),
-        intensity: 1.0,
-        type: "POINT",
-        attenuationRadius: 1.0,
-        radius: 1.0,
-        index: 0,
-        shadowCamera: null,
-    }
+  let light2 = {
+    position: new THREE.Vector3(0, 10, 0),
+    color: new THREE.Color(0x0070ff),
+    intensity: 8.8,
+    type: "POINT",
+    attenuationRadius: 60.0,
+    radius: 1.0,
+    useShadow: false,
+    shadowCamera: null,
+  };
 
-    let light3 = {
-        position: THREE.Vector3(10, 0, -10),
-        color: THREE.Color(0xffffff),
-        intensity: 1.0,
-        type: "POINT",
-        attenuationRadius: 1.0,
-        radius: 1.0,
-        index: 0,
-        shadowCamera: null,
-    }
-    let light4 = {
-        position: THREE.Vector3(0, 0, 10),
-        color: THREE.Color(0xffffff),
-        intensity: 1.0,
-        type: "POINT",
-        attenuationRadius: 1.0,
-        radius: 1.0,
-        index: 0,
-        shadowCamera: null,
-    }
+  let light3 = {
+    position: new THREE.Vector3(10, 0, -10),
+    color: new THREE.Color(0xcd00e1),
+    intensity: 8.3,
+    type: "POINT",
+    attenuationRadius: 60.0,
+    radius: 1.0,
+    useShadow: false,
+    shadowCamera: null,
+  };
+  let light4 = {
+    position: new THREE.Vector3(0, 0, 10),
+    color: new THREE.Color(0xff6567),
+    intensity: 8.5,
+    type: "POINT",
+    attenuationRadius: 60.0,
+    radius: 1.0,
+    useShadow: false,
+    shadowCamera: null,
+  };
 
+  scene.addLight(light1, null);
+  scene.addLight(light2, null);
+  scene.addLight(light3, null);
+  scene.addLight(light4, null);
 
   //Geometry
 
@@ -320,7 +388,7 @@ function init() {
   });
 
   particles = new THREE.Points(particleGeometry, materialP);
-  scene.add(particles);
+  scene.addForward(particles, true);
 
   posAnim = new TWEEN.Tween(particles.position).to(
     {
@@ -333,11 +401,29 @@ function init() {
   posAnim.repeat(Infinity);
 
   const loader = new GLTFLoader().setPath("../resources/scene/");
+
   loader.load("l4.glb", function (gltf) {
     model = gltf.scene;
 
     model.traverse((o) => {
-      if (o.isMesh) o.material = new THREE.MeshPhysicalMaterial();
+      if (o.isMesh && !o.isDefered) {
+        let deferedO = new DeferedMesh(o.geometry, {
+          roughness: 0.1,
+          metalness: 0.1,
+          color: new THREE.Color(0xffffff),
+          emissiveColor: new THREE.Color(0xff6567),
+          emissiveStrength: 0,
+        });
+
+        scene.addDefered(deferedO, false);
+
+        o.parent.add(deferedO);
+        o.children.forEach((child) => {
+          deferedO.add(child);
+        });
+
+        o.removeFromParent();
+      }
     });
 
     model.position.set(0, 0, 0);
@@ -372,37 +458,6 @@ function init() {
         camera.rotateOnAxis(new THREE.Vector3(0, 1, 0), v * Math.PI);
       },
 
-      get bloom_str() {
-        return bloomPass.strength;
-      },
-      set bloom_str(v) {
-        bloomPass.strength = v;
-      },
-
-      get bloom_rad() {
-        return bloomPass.radius;
-      },
-      set bloom_rad(v) {
-        bloomPass.radius = v;
-      },
-
-      get bloom_thr() {
-        return bloomPass.threshold;
-      },
-      set bloom_thr(v) {
-        bloomPass.threshold = v;
-      },
-
-      get up() {
-        return renderer.getPixelRatio();
-      },
-      set up(v) {
-        renderer.setPixelRatio(v);
-        composer.setPixelRatio(v);
-        params.pixelRatio = v;
-        onWindowResize();
-      },
-
       get cursorAnimation() {
         return params.cursorAnimation;
       },
@@ -415,12 +470,12 @@ function init() {
     };
 
   folderLocal.add(propsLocal, "Y", -0.25, 0.25);
-  folderLocal.add(propsLocal, "bloom_str", 0, 5);
-  folderLocal.add(propsLocal, "bloom_rad", 0, 5);
-  folderLocal.add(propsLocal, "bloom_thr", 0, 1);
-  folderLocal.add(propsLocal, "up", 0.5, 5);
+
   folderLocal.add(propsLocal, "cursorAnimation", [0, 1]);
 }
+
+let uniformObject = {};
+let previousUniformObjects = [ { ...uniformObject }];
 
 function animate() {
   requestAnimationFrame(animate);
@@ -429,17 +484,15 @@ function animate() {
 
   TWEEN.update();
 
-  composer.render();
-  //renderer.setRenderTarget(null);
-  renderer.setClearColor(0x0e1946, 1);
-  //renderer.clear();
+  Object.keys(UniformsPool).forEach((key) => {
+    if (UniformsPool[key]) uniformObject[key] = UniformsPool[key](scene, params, previousUniformObjects);
+  });
+  renderer.render(scene, uniformObject);
 
-  //console.log(fsQuad, composer);
-  fsQuad.material.uniforms["tDiffuse"].value = composer.writeBuffer.texture;
-  fsQuad.material.blending = THREE.AdditiveBlending;
-  fsQuad.render(renderer);
-
-  renderer.setClearColor(0x0, 0);
+  previousUniformObjects = [ { ...uniformObject } ];
 
   stats.end();
 }
+
+init();
+animate();

@@ -10,6 +10,7 @@ import DepthMaterialParticles from "./shaders/DepthMaterialParticles";
 import Final from "./shaders/Final";
 import ForwardMaterial from "./shaders/ForwardMaterial";
 import GBufferParticles from "./shaders/GBufferParticles";
+import GBuffer from "./shaders/GBuffer";
 import Gradient from "./shaders/Gradient";
 import ModelToTexturePosition from "./shaders/ModelToTexturePosition";
 import Simulation from "./shaders/Simulation";
@@ -33,6 +34,7 @@ export default () => {
     Final,
     ForwardMaterial,
     GBufferParticles,
+    GBuffer,
     Gradient,
     ModelToTexturePosition,
     Simulation,

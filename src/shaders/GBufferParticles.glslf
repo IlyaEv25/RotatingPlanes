@@ -47,6 +47,10 @@ uniform vec3 baseColor3;
 uniform vec3 baseColor4;
 uniform vec3 effectColor;
 
+uniform float targetFPS;
+uniform float FPS;
+uniform float bloomVelocityMultiplier;
+
 uniform vec2 resolution;
 
 layout(location = 0) out vec4 gColor;

@@ -8,9 +8,9 @@ let shaders = shaderLoad();
 //let ShaderPass = loadShaderPass(THREE);
 
 let lightTypeMap = {
-  "AREA": 0,
-  "POINT": 1
-}
+  AREA: 0,
+  POINT: 1,
+};
 
 class GeneralRenderPass {
   constructor(name, uniforms, numColorTargets, isDepthTarget, width, height, clear, textureType) {
@@ -81,19 +81,20 @@ class GeneralRenderPass {
 
   updateDependencies(dependencyGraph) {
     let dependencies = dependencyGraph[this.name];
-    dependencies.forEach((dependency) => {
-      let index = dependency.channel;
+    if (dependencies)
+      dependencies.forEach((dependency) => {
+        let index = dependency.channel;
 
-      if (dependency.type == "color") this.uniforms[dependency.uniform].value = dependency.instance.renderTarget.texture[index];
-      else this.uniforms[dependency.uniform].value = dependency.instance.renderTarget.depthTexture;
-    });
+        if (dependency.type == "color") this.uniforms[dependency.uniform].value = dependency.instance.renderTarget.texture[index];
+        else this.uniforms[dependency.uniform].value = dependency.instance.renderTarget.depthTexture;
+      });
   }
 
   render(renderer, scene, camera, uniformObject, dependencyGraph) {
     renderer.setRenderTarget(this.renderTarget);
     if (this.clear) renderer.clear();
     this.renderCounter++;
-    this.renderCounter = this.renderCounter % 8.0;
+    this.renderCounter = this.renderCounter % 32.0;
     this.updateUniforms(uniformObject);
     this.updateDependencies(dependencyGraph);
   }
@@ -171,53 +172,19 @@ class OverrideMaterialScenePass extends GeneralRenderPass {
 class GBufferPass extends GeneralRenderPass {
   constructor(name, shader, numColorTargets, isDepthTarget, width, height, clear, textureType) {
     super(name, shader.uniforms, numColorTargets, isDepthTarget, width, height, clear, textureType);
-    this.material = new THREE.RawShaderMaterial({
-      uniforms: this.uniforms,
-      vertexShader: shader.vertexShader,
-      fragmentShader: shader.fragmentShader,
-      defines: shader.defines,
-    });
-    this.material.glslVersion = THREE.GLSL3;
-    //this.material.isMeshStandardMaterial = true;
-    this.material.onBeforeRender = (_this, scene, camera, geometry, object, group) => {
-      if (this.uniforms["modelViewMatrix"]) this.uniforms["modelViewMatrix"].value = object.modelViewMatrix;
-      if (this.uniforms["modelMatrix"]) this.uniforms["modelMatrix"].value = object.matrixWorld;
-      if (this.uniforms["projectionMatrix"]) this.uniforms["projectionMatrix"].value = camera.projectionMatrix;
-    };
   }
 
   render(renderer, scene, camera, uniformObject, dependencyGraph) {
     super.render(renderer, scene, camera, uniformObject, dependencyGraph);
-    scene.forwardMaterials.forEach((material) => {
-      material.meshes.forEach((mesh) => {
-        mesh.visible = false;
-      });
+    scene.forwardObjects.forEach((o) => {
+      o.visible = false;
     });
-    scene.deferedMaterials.forEach((material) => {
-      let roughness = material.roughness;
-      let metallic = material.metallic;
-      let emissiveColor = material.emissiveColor;
-      let emissiveStrength = material.emissiveStrength;
-      let color = material.color;
-
-      material.meshes.forEach((mesh) => {
-        mesh.visible = true;
-        mesh.material = this.material;
-        mesh.material.uniforms.color.value = new THREE.Color(color);
-        mesh.material.uniforms.roughness.value = roughness;
-        mesh.material.uniforms.emissiveColor.value = new THREE.Color(emissiveColor);
-        mesh.material.uniforms.metallic.value = metallic;
-        mesh.material.uniforms.emissiveStrength.value = emissiveStrength;
-      });
+    scene.deferedObjects.forEach((o) => {
+      o.visible = true;
+      o.updateGlobalUniforms(uniformObject, this.renderCounter);
     });
 
     renderer.render(scene, camera);
-
-    scene.forwardMaterials.forEach((material) => {
-      material.meshes.forEach((mesh) => {
-        mesh.visible = false;
-      });
-    });
   }
 }
 
@@ -238,15 +205,11 @@ class QuadOverForwardScenePass extends GeneralRenderPass {
 
   render(renderer, scene, camera, uniformObject, dependencyGraph) {
     super.render(renderer, scene, camera, uniformObject, dependencyGraph);
-    scene.forwardMaterials.forEach((material) => {
-      material.meshes.forEach((mesh) => {
-        mesh.visible = true;
-      });
+    scene.forwardObjects.forEach((o) => {
+      o.visible = true;
     });
-    scene.deferedMaterials.forEach((material) => {
-      material.meshes.forEach((mesh) => {
-        mesh.visible = false;
-      });
+    scene.deferedObjects.forEach((o) => {
+      o.visible = false;
     });
     renderer.render(scene, camera);
     this.pass.render(renderer, this.renderTarget);
@@ -255,7 +218,7 @@ class QuadOverForwardScenePass extends GeneralRenderPass {
 
 class LightPass extends QuadOverForwardScenePass {
   constructor(name, shader, numColorTargets, isDepthTarget, width, height, clear, textureType) {
-    super(name, shader.uniforms, numColorTargets, isDepthTarget, width, height, clear, textureType);
+    super(name, shader, numColorTargets, isDepthTarget, width, height, clear, textureType);
     this.N = 0;
     this.shadowPasses = [];
   }
@@ -272,27 +235,25 @@ class LightPass extends QuadOverForwardScenePass {
     this.uniforms["lights"].value = [];
     this.uniforms["u_shadow_depth"].value = [];
 
-
-    if (scene.lights.length > this.N)
-      for (let i = this.N; i < scene.lights.length; i++)
-        this.buildShadowPass();
+    if (scene.lights.length > this.N) for (let i = this.N; i < scene.lights.length; i++) this.buildShadowPass();
 
     scene.lights.forEach((light, index) => {
+      if (light.useShadow) this.shadowPasses[index].render(renderer, scene, light.shadowCamera, uniformObject, dependencyGraph);
 
-      this.shadowPasses[index].render(renderer, scene, light.shadowCamera, uniformObject, dependencyGraph);
       this.uniforms["lights"].value.push({
         position: light.position,
-        intensity: light.intensity,
         color: light.color,
         intensity: light.intensity,
         type: lightTypeMap[light.type],
         attenuationRadius: light.attenuationRadius,
         radius: light.radius,
-        useShadow: light.useShadow
+        useShadow: light.useShadow ? 1 : 0,
       });
       this.uniforms["u_shadow_depth"].value.push(this.shadowPasses[index].renderTarget.depthTexture);
     });
+    renderer.setClearColor(scene.backgroundColor, 1.0);
     super.render(renderer, scene, camera, uniformObject, dependencyGraph);
+    renderer.setClearColor(0x0, 0.0);
   }
 }
 
@@ -308,6 +269,7 @@ let typePassMap = {
 class Pipeline {
   constructor(width, height, pipelineDescription) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer.autoClear = false;
     this.renderer.setClearAlpha(0.0);
     this.domElement = this.renderer.domElement;
     this.renderer.setSize(width, height);
@@ -353,7 +315,7 @@ class Pipeline {
   render(scene, uniformObject) {
     let renderer = this.renderer;
     this.renderPipeline.forEach((pass) => {
-      if (pass.name != "shadow") pass.render(renderer, scene, camera, uniformObject, this.dependencyGraph);
+      if (pass.name != "shadow") pass.render(renderer, scene, scene.camera, uniformObject, this.dependencyGraph);
       else pass.render(renderer, scene, shadowCamera, uniformObject, this.dependencyGraph);
     });
   }

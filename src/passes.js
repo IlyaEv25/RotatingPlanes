@@ -6,8 +6,26 @@ let gBuffer = () => {
   return {
     name: "gBuffer",
     type: "GBufferPass",
+    shader: shaders.GBuffer,
+    numberOfColorAttachments: 4,
+    isDepthTarget: true,
+    width: (sizes) => {
+      return sizes.width;
+    },
+    height: (sizes) => {
+      return sizes.height;
+    },
+    clear: true,
+    textureType: FloatType,
+  };
+};
+
+let gBufferParticles = () => {
+  return {
+    name: "gBuffer",
+    type: "GBufferPass",
     shader: shaders.GBufferParticles,
-    numberOfColorAttachments: 3,
+    numberOfColorAttachments: 4,
     isDepthTarget: true,
     width: (sizes) => {
       return sizes.width;

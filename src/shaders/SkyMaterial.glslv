@@ -168,6 +168,8 @@ float Halton(int i, int b)
     return r;
 }
 
+varying float vDepth;
+
 void main() {
     vWorldDirection = transformDirection( position, modelMatrix );
     vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
@@ -188,6 +190,7 @@ void main() {
 	// jitteredProjectionMatrix[2][1] = jitterY;
 
     mvPosition = modelViewMatrix * mvPosition;
+    vDepth = - mvPosition.z;
     gl_Position = projectionMatrix * mvPosition;
     gl_Position.z = gl_Position.w;
 }

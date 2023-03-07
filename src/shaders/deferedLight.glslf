@@ -1,29 +1,5 @@
-//#define varying in
-
-
-// #define LIGHTING 1
-// #define POSTGREY 0
-// #define ONECOLOR 0
-
-// layout(location = 0) out highp vec4 pc_fragColor;
-// #define gl_FragColor pc_fragColor
-// #define gl_FragDepthEXT gl_FragDepth
-// #define texture2D texture
-// #define textureCube texture
-// #define texture2DProj textureProj
-// #define texture2DLodEXT textureLod
-// #define texture2DProjLodEXT textureProjLod
-// #define textureCubeLodEXT textureLod
-// #define texture2DGradEXT textureGrad
-// #define texture2DProjGradEXT textureProjGrad
-// #define textureCubeGradEXT textureGrad
-
 #define PI 3.141592653589793
 #define PI2 6.283185307179586
-
-#define ORIGINAL 0
-#define PHYSICAL 1
-#define BLACK 2
 
 #define RECIPROCAL_PI 0.3183098861837907
 #define TOTAL 65536
@@ -34,45 +10,50 @@ precision highp sampler2D;
 //uniform sampler2D map;
 uniform sampler2D environmentMap;
 uniform sampler2D u_depth;
-uniform sampler2D u_normal;
-uniform sampler2D u_color;
+uniform sampler2D u_normal_metalness;
+uniform sampler2D u_albedo_roughness;
+uniform sampler2D u_emission;
+
 uniform sampler2D u_ssao_mask;
-uniform sampler2D u_shadow_depth;
+
+#if NUM_LIGHTS > 0
+uniform sampler2D u_shadow_depth[NUM_LIGHTS];
+#endif
 
 uniform mat4 projectionMatrixInverse;
 uniform mat4 viewMatrixInverse;
 
 uniform vec3 positionCamera;
-uniform vec3 lightPosition;
 
-uniform float lightIntensity;
-uniform float lightRadius;
-uniform float attenuationRadius;
-
-
-uniform float roughness;
-uniform float metallic;
-uniform float u_spec;
-uniform vec3 ambientColor;
-uniform float ambientIntensity;
 uniform float envMapIntensity;
-uniform float toneMappingExposure;
 uniform float shadowDarkness;
-uniform float globalScale;
 
-uniform mat4 shadowProjectionMatrix;
-uniform mat4 shadowViewMatrix;
-uniform mat4 shadowProjectionMatrixInverse;
-uniform mat4 shadowViewMatrixInverse;
+#if NUM_LIGHTS > 0
+uniform mat4 shadowProjectionMatrix[NUM_LIGHTS];
+uniform mat4 shadowViewMatrix[NUM_LIGHTS];
+uniform mat4 shadowProjectionMatrixInverse[NUM_LIGHTS];
+uniform mat4 shadowViewMatrixInverse[NUM_LIGHTS];
+#endif
 
 uniform float shadowRadius;
 uniform float shadowBias;
 uniform float numOfPoissonDisks;
-uniform float useShadows;
 
 varying vec2 vUv;
 
+struct Light {
+	vec3 position;
+	vec3 color;
+	float intensity;
+	float type;
+	float attenuationRadius;
+	float radius;
+	float useShadow;
+};
 
+#if NUM_LIGHTS > 0
+uniform Light lights[NUM_LIGHTS];
+#endif
 
 #ifndef saturate
     #define saturate( a ) clamp( a, 0.0, 1.0 )
@@ -98,12 +79,6 @@ varying vec2 vUv;
 #define v6 0.0038
 #define m6 4.0
 
-struct ReflectedLight {
-    vec3 directDiffuse;
-    vec3 directSpecular;
-    vec3 indirectDiffuse;
-    vec3 indirectSpecular;
-};
 
 float random(vec3 seed, int i){
 	vec4 seed4 = vec4(seed,i);
@@ -116,47 +91,6 @@ highp float rand( const in vec2 uv ) {
     highp float dt = dot( uv.xy, vec2( a, b ) ), sn = mod( dt, PI );
     return fract( sin( sn ) * c );
 }
-
-float sampleVisibility( vec3 coord, float bias ) {
-	vec2 sampleCo = (coord.xy + 1.0) / 2.0;
-	
-
-	float depth = texture2D( u_shadow_depth, sampleCo.xy ).r * 2.0 - 1.0;
-	//depth = depth / f;
-
-	float visibility  = ( coord.z - depth > bias ) ? 0. : 1.;
-	return visibility;
-}
-
-vec3 hsv2rgb(vec3 c) {
-#if POSTGREY == 1
-    vec4 K = vec4(0.5, 3.0 / 3.0, 2.5 / 3.0, 3.0);
-#else
-	vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-#endif
-    vec3 p = abs(fract(c.xxx - K.xyz) * 6.0 - K.www);
-    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-}
-
-// vec3 hsv2rgb(vec3 c)
-// {
-//     vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-//     vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-//     return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-// }
-
-
-vec3 rgb2hsv(vec3 c)
-{
-    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
-    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
-    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
-
-    float d = q.x - min(q.w, q.y);
-    float e = 1.0e-10;
-    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
-}
-
 
 float getFace( vec3 direction ) {
 	vec3 absDirection = abs( direction );
@@ -335,66 +269,8 @@ void computeMultiscattering( const in vec3 normal, const in vec3 viewDir, const 
     multiScatter += Fms * Ems;
 }
 
-vec3 RRTAndODTFit( vec3 v ) {
-    vec3 a = v * ( v + 0.0245786 ) - 0.000090537;
-    vec3 b = v * ( 0.983729 * v + 0.4329510 ) + 0.238081;
-    return a / b;
-}
+vec3 BRDF(vec3 v, vec3 l, vec3 n, vec3 albedo, float metallic, float roughness, float visibility, float dist, float radius, float attenuationRadius, float lightIntensity, vec3 lightColor) {
 
-vec3 ACESFilmicToneMapping( vec3 color ) {
-    const mat3 ACESInputMat = mat3(
-    vec3( 0.59719, 0.07600, 0.02840 ), vec3( 0.35458, 0.90834, 0.13383 ), vec3( 0.04823, 0.01566, 0.83777 )
-    );
-    const mat3 ACESOutputMat = mat3(
-    vec3(  1.60475, -0.10208, -0.00327 ), vec3( -0.53108, 1.10813, -0.07276 ), vec3( -0.07367, -0.00605, 1.07602 )
-    );
-    color *= toneMappingExposure; // / 0.6;
-    color = ACESInputMat * color;
-    color = RRTAndODTFit( color );
-    color = ACESOutputMat * color;
-    return color; //clamp( color, 0.0, 1.0 );
-}
-
-vec3 Tonemap_ACES(vec3 x) {
-    // Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
-    const float a = 2.51;
-    const float b = 0.03;
-    const float c = 2.43;
-    const float d = 0.59;
-    const float e = 0.14;
-    return (x * (a * x + b)) / (x * (c * x + d) + e);
-}
-
-vec3 CustomToneMapping( vec3 color ) {
-    return color;
-}
-vec3 toneMapping( vec3 color ) {
-    return ACESFilmicToneMapping( color );
-}
-
-const float LinearEncodePowerApprox = 1.5;
-const float GammaEncodePowerApprox = 1.0/LinearEncodePowerApprox;
-
-float toGammaSpace(float color) {
-    return pow(color, GammaEncodePowerApprox);
-}
-vec3 toGammaSpace(vec3 color) {
-    return pow(color, vec3(GammaEncodePowerApprox));
-}
-vec4 toGammaSpace(vec4 color) {
-    return vec4(pow(color.rgb, vec3(GammaEncodePowerApprox)), color.a);
-}
-
-vec4 applyImageProcessing(vec4 result) {
-    result.rgb = toGammaSpace(result.rgb);
-    result.rgb = saturate(result.rgb);
-    return result;
-}
-
-
-vec3 BRDF(vec3 v, vec3 l, vec3 n, vec3 albedo, float metallic, float roughness, float ao, vec3 ambientColor, float ambientIntensity, float visibility, float dist, float radius) {
-
-	vec3 lightColor = vec3(1.0, 1.0, 1.0);
 
     vec3 N = n;
     vec3 V = v;
@@ -407,105 +283,24 @@ vec3 BRDF(vec3 v, vec3 l, vec3 n, vec3 albedo, float metallic, float roughness, 
 
 	// calculate per-light radiance
 	vec3 L = l;
-	vec3 H = normalize(V + L);//length(V+L)> 0.01? normalize(V + L) : vec3(0.0);
-	float distance = dist / attenuationRadius; // / 1000.0; //length(lightPosition - wPosition) - 3100.0;
-
-	//float attenuation = pow(clamp(1.0 - pow(distance/(radius), 4.0), 0.0, 1.0), 2.0) / ((distance * distance) + 1.0);
-
-	//float attenuation = 1.0 / (distance * distance);
+	vec3 H = normalize(V + L);
+	float distance = dist / attenuationRadius; 
 	float attenuation = 2.0 / (distance * distance + radius * radius + distance * sqrt(distance * distance + radius * radius));
-	vec3 radiance = lightIntensity * lightColor * attenuation; // + getIBLRadiance(v, n, roughness);
-
-
-
+	vec3 radiance = lightIntensity * lightColor * attenuation; 
 	// Cook-Torrance BRDF
 	float NDF = DistributionGGX(N, H, roughness);   
 	float G   = GeometrySmith(N, V, L, roughness);      
 	vec3 F    = fresnelSchlick(max(dot(H, V), 0.0), F0);
-		
 	vec3 numerator    = NDF * G * F; 
 	float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001; // + 0.0001 to prevent divide by zero
-	vec3 specular = numerator / denominator; //clamp(numerator / denominator, -1.0, 1.0); //might be good for microfacet model
-
-	//vec3 specular = vec3(pow(max(dot(N, H), 0.0), 32.0));
-
-	
+	vec3 specular = numerator / denominator; 
 	// kS is equal to Fresnel
 	vec3 kS = F;
 	vec3 kD = vec3(1.0) - kS;
 	kD *= 1.0 - metallic;	  
-
 	float NdotL = max(dot(N, L), 0.0);// + 0.001;        
-
-	vec3 indirectIrradiance = getIBLIrradiance( n );
-	vec3 indirectRadiance = getIBLRadiance(v, n, roughness);
-
-	//vec3 indirectSpecular = RE_IndirectSpecular_Physical( indirectRadiance, indirectIrradiance, vec3(0.0), const in GeometricContext geometry,)
-
-
-	vec3 singleScattering = vec3( 0.0 );
-    vec3 multiScattering = vec3( 0.0 );
-    vec3 cosineWeightedIrradiance = indirectIrradiance * RECIPROCAL_PI;
-
-    computeMultiscattering( n, v, F0, 1.0, roughness, singleScattering, multiScattering );
-
-    vec3 totalScattering = singleScattering + multiScattering;
-    vec3 diffuse = albedo * ( 1.0 - max( max( totalScattering.r, totalScattering.g ), totalScattering.b ) );
-    vec3 indirectSpecular = indirectRadiance * singleScattering;
-    indirectSpecular += multiScattering * cosineWeightedIrradiance;
-    vec3 indirectDiffuse = diffuse * cosineWeightedIrradiance;
-
-	// if (dot(l, N) <= 0.0)
-	// 	radiance = vec3(0.0);
-
-	Lo += (kD * albedo / PI + specular) * radiance * (NdotL) * ((1.0 - (1.0 - visibility) * shadowDarkness)) + indirectSpecular + indirectDiffuse;  // note that we already multiplied the BRDF by the Fresnel (kS) so we won't multiply by kS again
-    
-    
-    //vec3 ambient = vec3(0.03) * albedo * ao + ambientIntensity * ambientColor;
-    vec3 ambient =  ambientIntensity * ambientColor;
-
-    vec3 color = ambient + Lo;
-	color *= ao;
-
-    //color = color / (color + vec3(1.0));
-	//color = ACESFilmicToneMapping(color);
-    //color = pow(color, vec3(1.0/2.2)); 
-
-	return color;
-}
-
-// vec4 LinearTosRGB( in vec4 value ) {
-//     return vec4( mix( pow( value.rgb, vec3( 0.41666 ) ) * 1.055 - vec3( 0.055 ), value.rgb * 12.92, vec3( lessThanEqual( value.rgb, vec3( 0.0031308 ) ) ) ), value.a );
-// }
-
-vec3 hueShift( vec3 color, float hueAdjust ){
-    const vec3  kRGBToYPrime = vec3 (0.299, 0.587, 0.114);
-    const vec3  kRGBToI      = vec3 (0.596, -0.275, -0.321);
-    const vec3  kRGBToQ      = vec3 (0.212, -0.523, 0.311);
-
-    const vec3  kYIQToR     = vec3 (1.0, 0.956, 0.621);
-    const vec3  kYIQToG     = vec3 (1.0, -0.272, -0.647);
-    const vec3  kYIQToB     = vec3 (1.0, -1.107, 1.704);
-
-    float   YPrime  = dot (color, kRGBToYPrime);
-    float   I       = dot (color, kRGBToI);
-    float   Q       = dot (color, kRGBToQ);
-    float   hue     = atan (Q, I);
-    float   chroma  = sqrt (I * I + Q * Q);
-
-    hue += hueAdjust;
-
-    Q = chroma * sin (hue);
-    I = chroma * cos (hue);
-
-    vec3    yIQ   = vec3 (YPrime, I, Q);
-
-    return vec3( dot (yIQ, kYIQToR), dot (yIQ, kYIQToG), dot (yIQ, kYIQToB) );
-}
-
-vec3 greyscale(vec3 color, float str) {
-    float g = dot(color, vec3(0.299, 0.587, 0.114));
-    return mix(color, vec3(g), str);
+	Lo += (kD * albedo / PI + specular) * radiance * (NdotL) * ((1.0 - (1.0 - visibility) * shadowDarkness));  // note that we already multiplied the BRDF by the Fresnel (kS) so we won't multiply by kS again
+	return Lo;
 }
 
 vec3 getWorldPositionFromDepth(mat4 projectionInverse, mat4 viewInverse, float depth) {
@@ -522,16 +317,73 @@ vec3 getWorldPositionFromDepth(mat4 projectionInverse, mat4 viewInverse, float d
     return worldSpacePosition.xyz;
 }
 
-vec4 getShadowPosition(vec3 worldPosition)
+vec4 getShadowPosition(vec3 worldPosition, int index)
 {
-	return shadowProjectionMatrix * shadowViewMatrix * vec4(worldPosition, 1.0);
+	return shadowProjectionMatrix[index] * shadowViewMatrix[index] * vec4(worldPosition, 1.0);
 }
+
+vec2 poissonDisk[12];
+
+#if NUM_LIGHTS > 0
+
+float sampleVisibility( int index, vec3 coord, float bias ) {
+	vec2 sampleCo = (coord.xy + 1.0) / 2.0;
+	
+	float depth;
+
+	if (index == 0) depth = texture2D( u_shadow_depth[0], sampleCo.xy ).r * 2.0 - 1.0;
+	if (index == 1) depth = texture2D( u_shadow_depth[1], sampleCo.xy ).r * 2.0 - 1.0;
+	if (index == 2) depth = texture2D( u_shadow_depth[2], sampleCo.xy ).r * 2.0 - 1.0;
+	if (index == 3) depth = texture2D( u_shadow_depth[3], sampleCo.xy ).r * 2.0 - 1.0;
+	//if (index == 4) depth = texture2D( u_shadow_depth[4], sampleCo.xy ).r * 2.0 - 1.0;
+	//if (index == 5) depth = texture2D( u_shadow_depth[5], sampleCo.xy ).r * 2.0 - 1.0;
+			
+	//depth = depth / f;
+
+	float visibility  = ( coord.z - depth > bias ) ? 0. : 1.;
+	return visibility;
+}
+
+float calculateOcclusion(vec3 wPosition, int index)
+{
+	int NUM_TAPS = int(numOfPoissonDisks);
+	float occlusion = 0.;
+
+	vec4 shadowPosition = getShadowPosition(wPosition, index);
+	vec3 shadowCoord = shadowPosition.xyz / shadowPosition.w;
+
+	float ANGLE_STEP = PI2 * float( 5 ) / float( NUM_TAPS );
+    float INV_NUM_SAMPLES = 1.0 / float( NUM_TAPS );
+        
+	float angle = rand( shadowCoord.xy ) * PI2;
+	float radius = INV_NUM_SAMPLES;
+	float radiusStep = radius;
+
+	if (lights[index].useShadow > 0.5 && NUM_TAPS > 0)
+	{
+		for (int i=0; i < NUM_TAPS; i++) {
+			vec2 poissonDisk = vec2( cos( angle ), sin( angle ) ) * pow( shadowRadius * 0.1 * (1.0 / 1024.0), 0.75 );
+			occlusion += sampleVisibility( index, shadowCoord + vec3(poissonDisk, 0.), shadowBias);
+
+			radius += radiusStep;
+        	angle += ANGLE_STEP;
+		}
+		occlusion /= float( NUM_TAPS );
+	}
+
+	else if(lights[index].useShadow > 0.5 && NUM_TAPS == 0)
+		occlusion = sampleVisibility( index, shadowCoord, shadowBias);
+
+	else
+		occlusion = 1.0;
+
+	return occlusion;
+}
+
+#endif
 
 void main() {
 
-	int NUM_TAPS = int(numOfPoissonDisks);
-
-	vec2 poissonDisk[12];
 	poissonDisk[0 ] = vec2( -0.94201624, -0.39906216 );
 	poissonDisk[1 ] = vec2( 0.94558609, -0.76890725 );
 	poissonDisk[2 ] = vec2( -0.094184101, -0.92938870 );
@@ -546,77 +398,63 @@ void main() {
 	poissonDisk[11] = vec2( 0.79197514, 0.19090188 );
 
 	float depth = texture(u_depth, vUv).r;
-	float alpha = texture(u_color, vUv).a;
+	float ao = texture(u_ssao_mask, vUv).r;
+	vec3 albedo = texture(u_albedo_roughness, vUv).xyz;
+	float metallic = texture(u_normal_metalness, vUv).a;
+	float preRoughness = texture(u_albedo_roughness, vUv).a;
 
-	gl_FragDepth = depth;
+	float alpha = preRoughness > 1.0 ? 1.0 : 0.0;
+	float roughness = preRoughness - 1.0;
+
+	vec3 emissionColor = texture(u_emission, vUv).xyz;
+	float emissionStrength = texture(u_emission, vUv).a;
 
 	vec3 wPosition = getWorldPositionFromDepth(projectionMatrixInverse, viewMatrixInverse, depth);
-
-	vec3 l = normalize( lightPosition - wPosition.xyz );
 	vec3 v = normalize( positionCamera - wPosition.xyz);
-	vec3 n = normalize(texture(u_normal, vUv).rgb);
-
-	float occlusion = 0.;
-	//float shadowDepth = texture(u_shadow_depth, vUv).r;
-	vec4 shadowPosition = getShadowPosition(wPosition);
-	vec3 shadowCoord = shadowPosition.xyz / shadowPosition.w;
-
-	float ANGLE_STEP = PI2 * float( 5 ) / float( NUM_TAPS );
-    float INV_NUM_SAMPLES = 1.0 / float( NUM_TAPS );
-        
-	float angle = rand( shadowCoord.xy ) * PI2;
-	float radius = INV_NUM_SAMPLES;
-	float radiusStep = radius;
-
-	if (useShadows > 0.5 && NUM_TAPS > 0)
-	{
-		for (int i=0; i < NUM_TAPS; i++) {
-			vec2 poissonDisk = vec2( cos( angle ), sin( angle ) ) * pow( shadowRadius * 0.1 * (1.0 / 1024.0), 0.75 );
-			occlusion += sampleVisibility( shadowCoord + vec3(poissonDisk, 0.), shadowBias);
-
-			radius += radiusStep;
-        	angle += ANGLE_STEP;
-		}
-		occlusion /= float( NUM_TAPS );
-	}
-
-	else if(useShadows > 0.5 && NUM_TAPS == 0)
-		occlusion = sampleVisibility( shadowCoord, shadowBias);
-
-	else
-		occlusion = 1.0;
-
-#if LIGHTING == ORIGINAL
-
-	float NdotL = max(dot(n, l), 0.0) + 0.001;
-	vec3 R = normalize(-reflect(l, n));
-	vec3 specular = u_spec * vec3(4. * pow(max(dot(R, v), 0.0), 100.));
-
-	float vLife = 50.0;
-	float c = texture(u_color, vUv).r;
-	gl_FragColor.rgb = hsv2rgb( vec3(c + .1 * vColor.x, clamp(d - .25 * vLife / 100.0, 0.0, 1.0), (0.5 + 0.5 * NdotL) * ( clamp(e - shadowDarkness * ( 1.0 - occlusion ), 0.0, 1.0) ) ) );
-	gl_FragColor.a = alpha;
-    gl_FragColor.rgb += vec3(specular) * occlusion;
-    
-#if POSTGREY == 1
-	gl_FragColor.rgb += .1 * vec3(55.,85.,149.)/255.;
-    gl_FragColor.rgb = greyscale(gl_FragColor.rgb, .4);
-    gl_FragColor.rgb = hueShift(gl_FragColor.rgb, -.325);
-#endif
-
-#elif LIGHTING == PHYSICAL
-
-	float ao = texture(u_ssao_mask, vUv).r;
-	float sphereRadius = lightRadius;
+	vec3 n = normalize(texture(u_normal_metalness, vUv).rgb);
 	vec3 r = reflect(-v, n);
-	vec3 L = lightPosition - wPosition.xyz;
-	float distLight = length(L);
-	L = normalize(L);
-	vec3 albedo = texture(u_color, vUv).xyz;
 
-	gl_FragColor = vec4(BRDF(v, L, n, albedo, metallic, roughness, ao, ambientColor, ambientIntensity, occlusion, distLight, sphereRadius), alpha);
-#else
-	gl_FragColor.rgb = vec3(0.0, 0.0, 0.0);
-	gl_FragColor.a = 1.0;
+
+	vec3 color = vec3(0.0);
+
+
+#if NUM_LIGHTS > 0
+	for (int i = 0; i < NUM_LIGHTS; i++)
+	{
+		vec3 L = lights[i].position - wPosition.xyz;
+		float distLight = length(L);
+		L = normalize(L);
+		float occlusion = calculateOcclusion(wPosition, i);
+
+		float radius = lights[i].radius;
+		float attenuationRadius = lights[i].attenuationRadius;
+		float lightIntensity = lights[i].intensity;
+		vec3 lightColor = lights[i].color;
+
+		color += BRDF(v, L, n, albedo, metallic, roughness, occlusion, distLight, radius, attenuationRadius, lightIntensity, lightColor);
+	}
 #endif
+
+	vec3 indirectIrradiance = getIBLIrradiance( n );
+	vec3 indirectRadiance = getIBLRadiance(v, n, roughness);
+	vec3 singleScattering = vec3( 0.0 );
+	vec3 multiScattering = vec3( 0.0 );
+	vec3 cosineWeightedIrradiance = indirectIrradiance * RECIPROCAL_PI;
+
+	vec3 F0 = vec3(0.04);
+	F0 = mix(F0, albedo, metallic);
+	computeMultiscattering( n, v, F0, 1.0, roughness, singleScattering, multiScattering );
+
+	vec3 totalScattering = singleScattering + multiScattering;
+	vec3 diffuse = albedo * ( 1.0 - max( max( totalScattering.r, totalScattering.g ), totalScattering.b ) );
+	vec3 indirectSpecular = indirectRadiance * singleScattering;
+	indirectSpecular += multiScattering * cosineWeightedIrradiance;
+	vec3 indirectDiffuse = diffuse * cosineWeightedIrradiance;
+
+	color += indirectSpecular + indirectDiffuse;
+	color += emissionStrength * emissionColor;
+	color *= ao;
+
+	gl_FragColor = vec4(color, alpha);
+	gl_FragDepth = depth;
 }
